@@ -1,19 +1,27 @@
-#[allow(dead_code)]
-pub fn start() {
-    println!("Visualization module started");
-    println!("Note: 3D visualization will be implemented in future iterations");
+//! Web-based 3D visualization module for quaternion education
+//! 
+//! This module provides interactive 3D visualizations for demonstrating
+//! quaternion concepts, gimbal lock problems, and rotation interpolation.
+//! It compiles to WebAssembly for browser-based education.
+
+use wasm_bindgen::prelude::*;
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, window};
+
+use crate::quaternion::{EulerAngles, QuaternionMath};
+use crate::gimbal_lock::GimbalLockDetector;
+
+/// 3D point for visualization
+#[derive(Clone, Copy)]
+pub struct Point3D {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
 }
 
-#[allow(dead_code)]
-pub struct Visualizer;
-
-#[allow(dead_code)]
-impl Visualizer {
-    pub fn new() -> Self {
-        Visualizer
-    }
-
-    pub fn setup(&self) {
-        println!("Setting up visualization environment...");
-    }
+/// 3D visualization canvas and rendering context
+pub struct Visualization3D {
+    canvas: HtmlCanvasElement,
+    context: CanvasRenderingContext2d,
+    width: f64,
+    height: f64,
 }
