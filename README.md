@@ -55,3 +55,107 @@
 - **Deployment**: GitHub Pages (free hosting)
 
 This approach gives you the **Rust performance and safety** you prefer while creating **accessible, interactive visualizations** that will be perfect for teaching students about quaternions.
+
+# Getting Started
+
+## Quick Setup
+
+### Linux/macOS
+```bash
+git clone https://github.com/robclever/learning_quaternians.git
+cd learning_quaternians
+make setup
+```
+
+### Windows
+```cmd
+git clone https://github.com/robclever/learning_quaternians.git
+cd learning_quaternians
+make setup-win
+```
+
+## Development Commands
+
+```bash
+make dev          # Build and run
+make test         # Run tests
+make fmt          # Format code
+make lint         # Run linter
+make release      # Build release version
+```
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed development instructions.
+
+## Project Structure
+
+```
+learning_quaternians/
+├── Cargo.toml          # Project configuration
+├── Makefile            # Development commands
+├── setup.sh            # Unix/Mac setup script
+├── setup.bat           # Windows setup script
+└── src/
+    ├── main.rs         # Application entry point
+    ├── quaternion.rs   # Quaternion mathematics
+    └── visualization.rs # Visualization module
+```
+
+## Compiling the Project
+
+### Quick Start
+```bash
+# Development build (fast compilation with debug info)
+make build
+
+# Release build (optimized for performance)
+make release
+```
+
+### Using Cargo Directly
+```bash
+# Development build
+cargo build
+
+# Release build (optimized)
+cargo build --release
+```
+
+### Running the Project
+```bash
+# Build and run in one step
+cargo run
+# or
+make dev
+
+# Run compiled binary directly
+./target/debug/learning_quaternians    # Development
+./target/release/learning_quaternians  # Release
+```
+
+### Additional Commands
+```bash
+# Fast compilation check without producing binary
+cargo check
+
+# Clean build artifacts
+make clean
+
+# Build and run all tests
+cargo test
+```
+
+### Web Compilation (Future)
+When web dependencies are enabled in `Cargo.toml`:
+```bash
+# Install WASM target
+rustup target add wasm32-unknown-unknown
+
+# Build for web deployment
+cargo build --target wasm32-unknown-unknown
+```
+
+### Build Outputs
+- **Development**: `target/debug/learning_quaternians`
+- **Release**: `target/release/learning_quaternians`
+
+The development build is recommended for everyday coding and testing, while the release build provides optimized performance for demonstrations and deployment.
