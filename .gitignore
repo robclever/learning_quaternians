@@ -25,6 +25,9 @@ Thumbs.db
 # Documentation build
 /doc
 
+# Generated interactive visualizations (built by `cargo run`, see README.md)
+/visualizations
+
 # Backup files
 *.bak
 *.backup

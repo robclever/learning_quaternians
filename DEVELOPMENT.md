@@ -56,10 +56,13 @@ learning_quaternians/
 ├── setup.sh            # Unix/Mac setup script
 ├── setup.bat           # Windows setup script
 ├── .gitignore          # Git ignore rules
+├── visualizations/     # Generated demo pages (git-ignored)
 └── src/
     ├── main.rs         # Application entry point
+    ├── constants.rs    # Tolerances, rig geometry and demo configuration
     ├── quaternion.rs   # Quaternion mathematics
-    └── visualization.rs # Visualization module
+    ├── gimbal_lock.rs  # Gimbal lock detection and analysis
+    └── visualization.rs # Visualization scene building and HTML export
 ```
 
 ## Development Commands
@@ -86,6 +89,52 @@ make release      # Build optimized release
 make clean        # Clean build artifacts
 make update       # Update dependencies
 ```
+
+## Interactive Visualization
+
+`cargo run` (or `make dev`) prints the maths demonstrations **and** generates
+`visualizations/gimbal_lock_demo.html` - a single self-contained page that needs
+no server, no CDN and no WebAssembly toolchain.
+
+```bash
+cargo run                    # generate the page and print a summary table
+cargo run -- --open          # generate and open it in your default browser
+make visualize               # same as `cargo run -- --open`
+cargo run -- --no-visualize  # skip page generation
+```
+
+The page is data plus SVG rendering: every number and every projected vertex is
+computed in Rust (`src/visualization.rs`), so a change to `quaternion.rs` or
+`gimbal_lock.rs` shows up in the picture on the next run. `visualizations/` is
+git-ignored because it is generated output.
+
+Where to change things:
+
+| Location | What it controls |
+|----------|------------------|
+| `src/constants.rs` (`GIMBAL_*`, `VISUALIZATION_*`) | ring radii, camera angle, sweep step, warning thresholds |
+| `GimbalRig` in `src/visualization.rs` | the three stacked ring rotations |
+| `build_shapes` / `build_labels` | what is drawn, and in what painter's order |
+| `HTML_DOCUMENT_HEAD` / `RENDERER_SCRIPT` | page styling and the math-free browser renderer |
+
+Run `cargo test` after a change: the visualization tests assert the geometric
+claims the demo makes (the axis gap equals `90 - |pitch|`, the rig matches the
+library's Euler conversion, the exported JSON parses, every point stays inside
+the viewport).
+
+## WebAssembly (optional feature)
+
+The browser/WebAssembly path described in the README is wired up as an optional
+feature so that native builds, `cargo test` and CI stay dependency-light:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo build --features wasm --target wasm32-unknown-unknown
+```
+
+Nothing in the default build needs these dependencies. The scene built by
+`build_gimbal_lock_demo()` is renderer-agnostic, so a `yew` or `wgpu` front end
+can consume it without touching the mathematics.
 
 ## Code Quality
 

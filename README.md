@@ -86,6 +86,56 @@ make release      # Build release version
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed development instructions.
 
+## Interactive Visualization: Gimbal Lock Demo
+
+`cargo run` prints the maths demonstrations **and** generates an interactive 3D
+visualization of gimbal lock:
+
+```bash
+cargo run                    # print the demos, generate the page, print a summary
+cargo run -- --open          # ...and open the page in your default browser
+make visualize               # same as `cargo run -- --open`
+cargo run -- --no-visualize  # maths demos only
+```
+
+Output: `visualizations/gimbal_lock_demo.html` - one self-contained file, no
+server, no CDN, no WebAssembly toolchain, works offline and can be shared or
+dropped onto GitHub Pages as-is.
+
+### What it shows
+
+A physical three-ring gimbal rig (outer **yaw**, middle **pitch**, inner
+**roll**) carrying a vehicle marker, drawn with an *orthographic* camera so that
+two collinear axes really do look collinear on screen.
+
+* Sweep the pitch slider, or press **Play**, or step with ←/→, from 0° to 90°.
+* Every ring draws its own rotation axis. As pitch grows, the orange **roll**
+  axis swings onto the blue **yaw** axis. The angle between them is exactly
+  `90° − |pitch|`, so at pitch = ±90° both rings spin about the same line.
+* At the singularity the two axes turn red and pulse, and the page explains that
+  rolling and yawing now produce the *same* twist: one degree of freedom is gone.
+* The read-out panel shows the Euler angles, the quaternion `[x, y, z, w]`, the
+  rotation matrix, the safety factor, the singularity type and the DOF lost.
+* The equivalence table lists *completely different* Euler triples at
+  pitch = +90° that describe the *same* orientation, because at that pitch the
+  attitude depends only on `(yaw − roll)`. Quaternions have no such degeneracy.
+
+### Why it is built this way
+
+All mathematics lives in Rust; the page only draws numbers that were computed
+by `quaternion.rs` and `gimbal_lock.rs`, so the picture can never disagree with
+the library it teaches:
+
+* `visualization::build_gimbal_lock_demo()` builds a renderer-agnostic scene
+  (Euler angles, quaternions, rotation matrices, projected geometry).
+* `visualization::Camera` projects that scene orthographically.
+* `visualization::render_html()` serialises it into a single HTML file.
+
+`visualizations/` is git-ignored because it is generated output. The browser
+dependencies (`yew`, `wasm-bindgen`, `web-sys`, …) are optional behind the
+`wasm` feature, so native builds stay dependency-light while this scene layer
+stays ready for a WebAssembly front end.
+
 ## Project Structure
 
 ```
@@ -94,10 +144,13 @@ learning_quaternians/
 ├── Makefile            # Development commands
 ├── setup.sh            # Unix/Mac setup script
 ├── setup.bat           # Windows setup script
+├── visualizations/     # Generated demo pages (git-ignored)
 └── src/
     ├── main.rs         # Application entry point
+    ├── constants.rs    # Shared tolerances and visualization configuration
     ├── quaternion.rs   # Quaternion mathematics
-    └── visualization.rs # Visualization module
+    ├── gimbal_lock.rs  # Gimbal lock detection and analysis
+    └── visualization.rs # Scene building, projection and HTML export
 ```
 
 ## Compiling the Project

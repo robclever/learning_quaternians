@@ -12,16 +12,31 @@ nalgebra = "0.32"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-# Web dependencies for WebAssembly compilation
-wasm-bindgen = "0.2"
-web-sys = "0.3"
-js-sys = "0.3"
+# Browser/WebAssembly dependencies for the web build of the visualization.
+# They are OPTIONAL so that native `cargo build`, `cargo test` and CI stay
+# dependency-light and can compile without a WebAssembly toolchain. Enable them
+# with `cargo build --features wasm` (targeting wasm32-unknown-unknown).
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3", optional = true, features = [
+    "CanvasRenderingContext2d",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Window",
+] }
+js-sys = { version = "0.3", optional = true }
 
-# Web framework for interactive UI
-yew = "0.19"
+# Web framework for interactive UI (WASM builds only)
+yew = { version = "0.19", optional = true }
 
-# Serialization for web communication
-serde-wasm-bindgen = "0.4"
+# Serialization for web communication (WASM builds only)
+serde-wasm-bindgen = { version = "0.4", optional = true }
+
+[features]
+default = []
+# Enables the browser/WebAssembly rendering path. Requires the
+# `wasm32-unknown-unknown` target (see DEVELOPMENT.md).
+wasm = ["wasm-bindgen", "web-sys", "js-sys", "yew", "serde-wasm-bindgen"]
 
 [dev-dependencies]
 criterion = "0.5"
