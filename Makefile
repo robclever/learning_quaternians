@@ -1,4 +1,4 @@
-.PHONY: build run test check fmt clean help setup dev release
+.PHONY: build run test check fmt clean help setup dev release visualize
 
 # Default target
 help:
@@ -13,6 +13,7 @@ help:
 	@echo "  make run        - Run the project"
 	@echo "  make build      - Build the project"
 	@echo "  make watch      - Run with auto-reload on file changes"
+	@echo "  make visualize  - Generate the gimbal lock demo page and open it"
 	@echo ""
 	@echo "Testing & Quality:"
 	@echo "  make test       - Run all tests"
@@ -46,6 +47,9 @@ build:
 
 watch:
 	cargo watch -x run
+
+visualize:
+	cargo run -- --open
 
 # Testing and quality
 test:
