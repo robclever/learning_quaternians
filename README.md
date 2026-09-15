@@ -4,13 +4,6 @@
 
 The demo link becomes available after the first successful GitHub Pages deployment.
 
-# TODO - 
-1. Determine what lanaguage is best for this activity
-2. Setup Shell of project
-3. Create mathematical representations
-4. Create visualization tools
-5. Create a visualization of quaternians with explanations - I'd like for this to be something I could show students one day as a professor.
-
 # This is why google tells me to use Quaternions:
 - No gimbal lock
 - Faster performance / compact
@@ -18,47 +11,6 @@ The demo link becomes available after the first successful GitHub Pages deployme
 - Smooth interpolation
 
 # Why should I use them in sensor fusion / robotics?
-
-# Recommended Development Language: Rust (with WebAssembly)
-
-## Why Rust is the best choice for this project:
-
-### 1. Visualization Excellence
-- Rust compiles to WebAssembly, allowing you to create **interactive, browser-based 3D visualizations** that students can access instantly without installing anything
-- Libraries like `nalgebra` provide excellent quaternion math support
-- Can integrate with web graphics libraries (Three.js, wgpu) for stunning 3D renders
-
-### 2. Educational Accessibility
-- Web-based visualizations mean students just need a browser - no complex setup
-- You can host it on GitHub Pages for free, making it easily shareable
-- Interactive elements (sliders, rotation controls) work naturally in browsers
-
-### 3. Performance + Safety
-- Rust's performance ensures smooth real-time 3D rendering even on complex quaternion operations
-- Memory safety prevents crashes during demonstrations
-- Satisfies the preference for Rust/C++ while providing modern tooling
-
-### 4. Professor-Friendly Features
-- Create step-by-step animations showing quaternion interpolation (slerp)
-- Interactive gimbal lock demonstrations
-- Real-time sensor fusion visualizations
-- All accessible via a simple URL you can share in class
-
-## Alternative Options:
-
-| Language | Pros | Cons |
-|----------|------|------|
-| **Python + Manim** | Beautiful math animations (3Blue1Brown style), rapid prototyping | Lower performance, less interactive |
-| **C++ + OpenGL** | Maximum performance, mature graphics ecosystem | Complex setup, harder to share with students |
-| **JavaScript/Three.js** | Easiest web deployment, great 3D libraries | No static typing, less mathematical rigor |
-
-## Suggested Rust Stack:
-- **Math**: `nalgebra` crate for quaternion operations
-- **Graphics**: `wgpu` or compile to WASM and use Three.js
-- **Web Framework**: `yew` or `seed` for interactive UI elements
-- **Deployment**: GitHub Pages (free hosting)
-
-This approach gives you the **Rust performance and safety** you prefer while creating **accessible, interactive visualizations** that will be perfect for teaching students about quaternions.
 
 # Getting Started
 
@@ -161,8 +113,46 @@ learning_quaternians/
     ├── constants.rs    # Shared tolerances and visualization configuration
     ├── quaternion.rs   # Quaternion mathematics
     ├── gimbal_lock.rs  # Gimbal lock detection and analysis
-    └── visualization.rs # Scene building, projection and HTML export
+    ├── visualization.rs # Visualization module entry point and public API
+    └── visualization/
+        ├── camera.rs    # Orthographic camera configuration and projection
+        ├── geometry.rs  # World/projected points and geometric helpers
+        ├── model.rs     # Serializable scene, frame, and metric data types
+        ├── rig.rs       # Nested gimbal geometry and projected shapes
+        ├── demo.rs      # Teaching sequences, metrics, and terminal summary
+        ├── export.rs    # HTML assembly, file writing, and browser launching
+        └── assets/      # Embedded HTML, CSS, and JavaScript for the page
 ```
+
+### What each Rust module does
+
+- `main.rs` parses command-line flags, runs the terminal demonstrations, and
+  coordinates visualization generation.
+- `constants.rs` keeps the shared geometry dimensions, tolerances, camera
+  settings, and demo defaults in one place.
+- `quaternion.rs` implements quaternion operations, Euler conversions,
+  interpolation, and rotation helpers.
+- `gimbal_lock.rs` analyzes Euler poses and identifies when the control axes
+  become redundant.
+- `visualization.rs` is the small public facade for the visualization package;
+  it exposes the demo builder, camera, scene types, and HTML export functions.
+- `visualization/camera.rs` defines the fixed orthographic camera and maps world
+  points into viewport coordinates.
+- `visualization/geometry.rs` contains reusable 3D points, projected points,
+  angle calculations, and numeric rounding helpers.
+- `visualization/model.rs` defines the serializable scene graph: shapes, labels,
+  frames, metrics, experiments, and demo metadata.
+- `visualization/rig.rs` builds the nested yaw, pitch, and roll rings, axes, and
+  vehicle marker for each pose.
+- `visualization/demo.rs` assembles the lesson's animation frames and
+  experiments, computes their metrics, and prints the terminal summary.
+- `visualization/export.rs` renders the scene data into a self-contained HTML
+  document, writes it to disk, and can open it in the default browser.
+
+The files under `visualization/assets/` are embedded at compile time. They hold
+the page shell (`head.html` and `body.html`), styles (`style.css`), and browser
+renderer (`renderer.js`). The browser only draws the numbers exported by Rust;
+it does not redo the quaternion or gimbal-lock mathematics.
 
 ## Compiling the Project
 
@@ -208,7 +198,7 @@ make clean
 cargo test
 ```
 
-### Web Compilation (Future)
+### Web Compilation
 When web dependencies are enabled in `Cargo.toml`:
 ```bash
 # Install WASM target
