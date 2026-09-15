@@ -1,5 +1,9 @@
 # learning_quaternians
 
+[Open the interactive quaternion lesson](https://robclever.github.io/learning_quaternians/)
+
+The demo link becomes available after the first successful GitHub Pages deployment.
+
 # TODO - 
 1. Determine what lanaguage is best for this activity
 2. Setup Shell of project
@@ -104,21 +108,28 @@ dropped onto GitHub Pages as-is.
 
 ### What it shows
 
-A physical three-ring gimbal rig (outer **yaw**, middle **pitch**, inner
-**roll**) carrying a vehicle marker, drawn with an *orthographic* camera so that
-two collinear axes really do look collinear on screen.
+The page is a guided lesson with four sections:
 
-* Sweep the pitch slider, or press **Play**, or step with ←/→, from 0° to 90°.
-* Every ring draws its own rotation axis. As pitch grows, the orange **roll**
-  axis swings onto the blue **yaw** axis. The angle between them is exactly
-  `90° − |pitch|`, so at pitch = ±90° both rings spin about the same line.
-* At the singularity the two axes turn red and pulse, and the page explains that
-  rolling and yawing now produce the *same* twist: one degree of freedom is gone.
-* The read-out panel shows the Euler angles, the quaternion `[x, y, z, w]`, the
-  rotation matrix, the safety factor, the singularity type and the DOF lost.
-* The equivalence table lists *completely different* Euler triples at
-  pitch = +90° that describe the *same* orientation, because at that pitch the
-  attitude depends only on `(yaw − roll)`. Quaternions have no such degeneracy.
+1. **What gimbal lock is:** nested Euler controls, aligned axes, and the loss of
+   an independent rotation direction.
+2. **Four selectable experiments:** pitch up to +90°, pitch down to −90°,
+   coupled roll/yaw changes that cancel at +90°, and the same changes at 85°.
+   Each experiment supports a slider and Play/Pause. Space and arrow keys work
+   when focus is outside an interactive control.
+3. **What a quaternion is:** four components, the unit-length constraint,
+   axis-angle encoding, composition, SLERP, and the q/−q equivalence.
+4. **Quaternion motion through 90°:** an independent slider and animation blend
+   rotations from 60° to 120° about Y. The vehicle's body axes stay perpendicular
+   in 3D, unlike the nested Euler control axes at gimbal lock.
+
+The readout shows Euler angles, quaternion `[x, y, z, w]`, a rotation matrix,
+axis separation, and singularity information. A fixed +90° equivalence table
+shows why different Euler triples can describe the same orientation.
+
+The lesson distinguishes an Euler-coordinate singularity from a physical gimbal
+mechanism: storing orientation as a quaternion avoids the former but does not
+mechanically unlock the latter. A pitch sweep alone can cross 90° with either
+representation; the problem is the loss of independent Euler controls there.
 
 ### Why it is built this way
 
@@ -212,3 +223,24 @@ cargo build --target wasm32-unknown-unknown
 - **Release**: `target/release/learning_quaternians`
 
 The development build is recommended for everyday coding and testing, while the release build provides optimized performance for demonstrations and deployment.
+
+## Publishing the visualization with GitHub Pages
+
+The workflow in `.github/workflows/pages.yml` tests the project, runs the Rust
+exporter, and publishes the generated HTML as the site's `index.html`.
+Generated files can stay git-ignored; GitHub builds them from source.
+
+One-time setup:
+
+1. In this repository on GitHub, open **Settings → Pages**.
+2. Under **Build and deployment**, choose **GitHub Actions** as the source.
+3. Merge the visualization changes and publishing workflow into `main`.
+4. Open **Actions → Publish visualization** and wait for the deployment to finish.
+   If the changes were already on `main` when Pages was enabled, use **Run workflow**
+   and select `main`.
+5. Visit <https://robclever.github.io/learning_quaternians/>.
+
+Subsequent pushes to `main` rebuild and publish the lesson automatically.
+The README links to that site; the interactive HTML does not run inside the README.
+If deployment is blocked by environment rules, check that the `github-pages`
+environment permits deployments from `main`.

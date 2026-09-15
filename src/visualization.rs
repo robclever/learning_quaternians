@@ -43,6 +43,7 @@ use std::process::Command;
 use nalgebra::{UnitQuaternion, Vector3};
 use serde::Serialize;
 
+// Pull constants required from other internal module
 use crate::constants::{
     GIMBAL_APPROACH_WARNING_DEGREES, GIMBAL_AXIS_ALIGNMENT_TOLERANCE_DEGREES,
     GIMBAL_AXIS_ALIGNMENT_WARNING_DEGREES, GIMBAL_AXIS_EXTENT, GIMBAL_BODY_SCALE,
@@ -391,6 +392,25 @@ pub struct EquivalenceRow {
     pub matches_reference: bool,
 }
 
+/// A selectable experiment; every pose is computed in Rust.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Experiment {
+    pub title: String,
+    pub explanation: String,
+    pub control_label: String,
+    pub frames: Vec<DemoFrame>,
+}
+
+/// A quaternion-driven pose, without an Euler-angle control chain.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuaternionFrame {
+    pub angle_degrees: f64,
+    pub quaternion: [f64; 4],
+    pub shapes: Vec<Shape>,
+}
+
 /// A complete exported demonstration: animation frames plus teaching text.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -413,6 +433,8 @@ pub struct Demo {
     pub equivalence: Vec<EquivalenceRow>,
     /// Teaching notes shown beside the animation.
     pub notes: Vec<String>,
+    pub experiments: Vec<Experiment>,
+    pub quaternion_frames: Vec<QuaternionFrame>,
 }
 
 /// The plane a gimbal ring is drawn in, in its own unrotated frame.
@@ -748,14 +770,13 @@ fn demo_notes() -> Vec<String> {
          towards the blue (yaw) axis."
             .to_string(),
         "At pitch = ±90° those two axes become the same line, so the orange and blue rings spin \
-         about the same axis. Rolling and yawing then produce the same twist: one degree of freedom \
-         is gone. That is gimbal lock."
+         about the same axis. Roll and yaw then act about the same line: one independent control direction \
+         is lost. That is gimbal lock."
             .to_string(),
         format!(
             "At pitch = +90° the orientation depends only on (yaw - roll) = {:.0}°, so completely \
              different Euler triples describe the very same attitude - see the table below. \
-             Quaternions have no such degeneracy: they encode the rotation itself, not a sequence of \
-             axis turns.",
+             Unit quaternions avoid this Euler singularity. They encode orientation directly; q and −q still represent the same rotation.",
             GIMBAL_DEMO_YAW_DEGREES - GIMBAL_DEMO_ROLL_DEGREES
         ),
         "Every number on this page - quaternion, rotation matrix, axis directions, safety factor - \
@@ -787,11 +808,8 @@ pub fn build_gimbal_lock_demo() -> Demo {
     }
 
     Demo {
-        title: "Gimbal lock: three Euler angles are not three independent controls".to_string(),
-        subtitle: "A ZYX Euler attitude swept from pitch 0° to pitch 90°. Watch the roll and yaw \
-                   axes converge - at 90° they are the same line, and one of the three controls \
-                   stops doing anything."
-            .to_string(),
+        title: "From gimbal lock to quaternions".to_string(),
+        subtitle: "Explore why rotation controls can lose a direction, then see how a quaternion represents orientation through the same pose.".into(),
         viewport_pixels: camera.viewport_pixels,
         metrics_decimals: VISUALIZATION_METRIC_DECIMAL_PLACES,
         axis_tolerance_degrees: GIMBAL_AXIS_ALIGNMENT_TOLERANCE_DEGREES,
@@ -799,7 +817,71 @@ pub fn build_gimbal_lock_demo() -> Demo {
         frames,
         equivalence: build_equivalence_rows(),
         notes: demo_notes(),
+        experiments: build_experiments(&camera),
+        quaternion_frames: build_quaternion_frames(&camera),
     }
+}
+
+/// Compare approaching either singularity with cancelling controls at and near it.
+fn build_experiments(camera: &Camera) -> Vec<Experiment> {
+    let cases = [
+        ("1. Pitch up to +90°", "Sweep upward: the roll and yaw axes become the same line. At +90°, orientation depends on yaw − roll.", "Pitch sweep", 0),
+        ("2. Pitch down to −90°", "The mirror case also locks. At −90°, orientation depends on yaw + roll; opposite changes in roll and yaw cancel.", "Pitch sweep", 1),
+        ("3. Two moving controls, one still body", "Pitch stays at +90°. Increase roll and yaw together: both numbers change, but their difference stays −10° and the vehicle stays still. Neither control is individually broken; their effects cancel.", "Coupled roll and yaw", 2),
+        ("4. Almost locked at 85°", "Repeat the same coupled changes at 85°. The vehicle moves a little because the axes are nearly aligned. This loss of sensitivity explains why Euler controls become awkward before exact lock.", "Coupled roll and yaw", 3),
+    ];
+    cases.into_iter().map(|(title, explanation, control_label, case)| {
+        let frames = (0..=45).map(|step| {
+            let amount = step as f64 * 2.0;
+            let (roll, pitch, yaw) = match case {
+                0 => (30.0, amount, 20.0),
+                1 => (30.0, -amount, 20.0),
+                2 => (30.0 + amount, 90.0, 20.0 + amount),
+                _ => (30.0 + amount, 85.0, 20.0 + amount),
+            };
+            let mut frame = build_frame(camera, &euler_from_degrees((roll, pitch, yaw)));
+            if case >= 2 {
+                frame.label = format!("controls +{amount:.0}°");
+                frame.explanation = if case == 2 {
+                    "Roll and yaw change together, but the vehicle orientation is unchanged. The quaternion and rotation matrix stay constant.".into()
+                } else {
+                    "The same control changes now produce a small motion. Near alignment makes these two controls nearly redundant.".into()
+                };
+            }
+            frame
+        }).collect();
+        Experiment { title: title.into(), explanation: explanation.into(), control_label: control_label.into(), frames }
+    }).collect()
+}
+
+/// SLERP crosses the Euler singularity without converting back to Euler controls.
+fn build_quaternion_frames(camera: &Camera) -> Vec<QuaternionFrame> {
+    let axis = Vector3::new(0.0, 1.0, 0.0);
+    let start = QuaternionMath::create_unit_quaternion(axis, 60_f64.to_radians());
+    let end = QuaternionMath::create_unit_quaternion(axis, 120_f64.to_radians());
+    (0..=60)
+        .map(|step| {
+            let q = QuaternionMath::slerp(&start, &end, step as f64 / 60.0);
+            let mut shapes: Vec<Shape> = body_marker_local_shapes()
+                .into_iter()
+                .map(|(kind, closed, points)| project_shape(camera, kind, closed, &points, &q))
+                .collect();
+            for plane in RingPlane::ALL {
+                shapes.push(project_shape(
+                    camera,
+                    plane.axis_kind(),
+                    false,
+                    &[Point3D::new(0.0, 0.0, 0.0), plane.local_axis().scaled(1.15)],
+                    &q,
+                ));
+            }
+            QuaternionFrame {
+                angle_degrees: 60.0 + step as f64,
+                quaternion: quaternion_export(&q),
+                shapes,
+            }
+        })
+        .collect()
 }
 
 /// Print the key frames of the demonstration to the terminal.
@@ -965,7 +1047,7 @@ fn frame_explanation(status: DemoStatus, metrics: &FrameMetrics) -> String {
         ),
         DemoStatus::Locked => format!(
             "Gimbal lock at pitch {:.0}°: the roll axis now lies exactly on the yaw axis, so \
-             rolling and yawing produce the same twist. {} of the three controls is doing nothing.",
+             roll and yaw are redundant. {} independent rotation direction is lost.",
             pitch, metrics.degrees_of_freedom_lost
         ),
     }
@@ -1083,7 +1165,7 @@ const HTML_DOCUMENT_HEAD: &str = r##"<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gimbal lock visualization</title>
+<title>From gimbal lock to quaternions</title>
 <style>
 :root {
   --bg:#0d1117; --panel:#161b22; --line:#30363d; --text:#e6edf3; --muted:#8b949e;
@@ -1096,11 +1178,11 @@ header { padding:26px 28px 6px; }
 h1 { font-size:23px; margin:0 0 6px; }
 h2 { font-size:14px; margin:0 0 8px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
 .sub { color:var(--muted); margin:0; max-width:88ch; }
-.layout { display:grid; grid-template-columns:minmax(340px,1fr) minmax(320px,430px); gap:18px; padding:16px 28px 32px; align-items:start; }
+.layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,520px); gap:18px; padding:16px 28px 32px; align-items:start; }
 @media (max-width:980px) { .layout { grid-template-columns:1fr; } }
 .stack { display:grid; gap:18px; }
 .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
-svg#stage { display:block; width:100%; height:auto; border-radius:10px; background:radial-gradient(circle at 50% 45%,#111823,#0a0e14 72%); }
+svg#stage, svg#quaternion-stage { display:block; width:100%; height:auto; border-radius:10px; background:radial-gradient(circle at 50% 45%,#111823,#0a0e14 72%); }
 .caption { min-height:3.4em; margin:12px 0 0; }
 .controls { display:flex; align-items:center; gap:12px; margin-top:12px; }
 .btn { background:#21262d; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 14px; font:inherit; cursor:pointer; }
@@ -1142,6 +1224,22 @@ td.no { color:var(--lock); }
 .aligned.k-yawAxis, .aligned.k-rollAxis { stroke:var(--lock); stroke-width:3.6; animation:pulse 1.1s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
 .axis-label { fill:var(--muted); font-size:13px; font-family:inherit; }
+.lesson { margin:18px 28px; max-width:1400px; }
+.lesson h2, .experiment-heading { color:var(--text); font-size:21px; text-transform:none; letter-spacing:0; }
+.lesson-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px; }
+.lesson p { max-width:85ch; }
+.step { color:var(--pitch); font-size:12px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+.concept-picture { margin:24px 0; padding:18px; background:var(--bg); border:1px solid var(--line); border-radius:12px; }
+.concept-picture svg { display:block; width:100%; height:auto; }
+.concept-picture figcaption { color:var(--muted); margin-top:12px; max-width:85ch; }
+.concept-panels { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+@media (max-width:700px) { .concept-panels { grid-template-columns:1fr; } }
+.formula { white-space:pre-wrap; padding:14px; background:var(--bg); border-radius:8px; font-family:ui-monospace,monospace; overflow-wrap:anywhere; }
+select { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font:inherit; }
+.table-scroll { overflow-x:auto; }
+.quaternion-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:24px; align-items:center; }
+a { color:var(--yaw); }
+@media (max-width:700px) { .lesson-grid, .quaternion-layout { grid-template-columns:1fr; } .lesson { margin:16px; } .layout { padding:16px; } .controls { flex-wrap:wrap; } }
 </style>
 </head>
 <body>
@@ -1155,10 +1253,26 @@ const HTML_PAGE_BODY: &str = r##"<header>
   <h1 id="title"></h1>
   <p class="sub" id="subtitle"></p>
 </header>
+<section class="lesson card" aria-labelledby="intro-heading">
+  <span class="step">01 / The problem</span>
+  <h2 id="intro-heading">What is gimbal lock?</h2>
+  <p>Imagine a camera carried by three nested rings. Each ring gives you a rotation control: <strong>yaw</strong> about Z, <strong>pitch</strong> about Y, and <strong>roll</strong> about X. Normally, their combined motions let you adjust orientation in three independent directions.</p>
+  <div class="lesson-grid">
+    <div><h3>Three controls</h3><p>Euler angles describe a sequence of turns. Here the outer yaw ring carries the pitch ring, which carries the roll ring. Turning an outer ring also moves the axes inside it.</p></div>
+    <div><h3>Two axes align</h3><p>At pitch +90° or −90°, the roll axis lies on the yaw axis. Those controls now turn about the same line. They cannot provide three independent small rotation adjustments.</p></div>
+    <div><h3>One direction is lost</h3><p>The object still has a valid orientation. The trouble is the controls: different roll/yaw settings can describe exactly the same pose. A camera pointing vertically or a three-ring platform can encounter this configuration.</p></div>
+  </div>
+  <p><strong>Why quaternions help:</strong> software can store and update orientation directly with a unit quaternion, avoiding this singularity in Euler coordinates. A quaternion does not mechanically unlock physical rings, and converting back to Euler controls brings the singularity back.</p>
+</section>
+<section class="lesson" aria-labelledby="examples-heading"><span class="step">02 / Try the controls</span><h2 id="examples-heading">Four ways to see the problem</h2><p>Choose an experiment, then drag its slider or press Play. Blue is yaw, green is pitch, orange is roll; the white marker is the vehicle.</p></section>
 <main class="layout">
   <section class="card">
+    <label for="experiment"><strong>Experiment</strong></label>
+    <select id="experiment"></select>
+    <p id="experiment-explanation"></p>
     <svg id="stage" viewBox="0 0 720 720" role="img" aria-label="Three nested gimbal rings with their rotation axes and a vehicle marker"></svg>
     <p class="caption" id="caption"></p>
+    <label id="control-label" for="slider">Pitch sweep</label>
     <div class="controls">
       <button class="btn" id="play" type="button">Play</button>
       <input id="slider" type="range" min="0" max="1" step="1" value="0" aria-label="Pitch angle">
@@ -1186,14 +1300,14 @@ const HTML_PAGE_BODY: &str = r##"<header>
       </div>
     </div>
     <div class="card">
-      <h2>Many Euler triples, one orientation</h2>
+      <h2>A fixed example at +90°</h2>
       <p class="muted" id="equiv-intro"></p>
-      <table class="equiv">
+      <div class="table-scroll"><table class="equiv">
         <thead>
           <tr><th>roll</th><th>pitch</th><th>yaw</th><th>yaw - roll</th><th>quaternion (x, y, z, w)</th><th>same?</th></tr>
         </thead>
         <tbody id="equiv-body"></tbody>
-      </table>
+      </table></div>
     </div>
     <div class="card">
       <h2>What to watch</h2>
@@ -1201,6 +1315,135 @@ const HTML_PAGE_BODY: &str = r##"<header>
     </div>
   </section>
 </main>
+<section class="lesson card" aria-labelledby="quaternion-heading">
+  <span class="step">03 / A different representation</span>
+  <h2 id="quaternion-heading">Quaternions, without the math refresher</h2>
+  <p><strong>Imagine holding a toy airplane.</strong> You want to describe which way it is pointing and how much it is tilted. That is its <em>orientation</em>. Its position in the room does not matter here.</p>
+  <div class="lesson-grid">
+    <div><h3>Euler angles: three turning instructions</h3><p>You could say, “Turn this far left, tip this far up, then roll this far.” Those are the yaw, pitch, and roll controls we used above.</p><p>The catch is that these turns affect the directions of the later controls. When two control axes line up, you effectively have two knobs doing the same job.</p></div>
+    <div><h3>Another way: one imaginary skewer</h3><p>Push an imaginary skewer through the airplane’s center. Point that skewer in the right direction, then turn the airplane around it.</p><p>Starting from a reference pose, you can reach any final orientation with one carefully chosen skewer direction and one amount of turn.</p></div>
+    <div><h3>A quaternion: four numbers storing that turn</h3><p>A rotation quaternion is a package of <strong>four numbers</strong> that encodes that same skewer-and-turn idea.</p><p>The numbers are arranged to make it easy for a computer to combine turns and smoothly move between orientations. You generally let a math library calculate them.</p></div>
+  </div>
+  <h3>So what do the four numbers mean?</h3>
+  <p>We label them <strong>(x, y, z, w)</strong>. The first three point along the imaginary skewer, but their size also depends on the amount of turn. The last number, w, helps encode that amount. <strong>They work together: x, y, and z are not three separate turn angles, and w is not a fourth direction.</strong></p>
+  <p>You do not have to read a quaternion and immediately picture the airplane. Think of these numbers as a useful storage format. The animation is what makes the stored orientation understandable.</p>
+  <h3>A concrete example</h3>
+  <p>Start with the airplane level. Put the skewer along its left-to-right axis—the Y axis in this demo—and turn it a quarter-turn, or <strong>90°</strong>. The quaternion for that turn is approximately:</p>
+  <figure class="concept-picture">
+    <div class="concept-panels">
+      <svg viewBox="0 0 320 290" role="img" aria-labelledby="skewer-start-title skewer-start-desc">
+        <title id="skewer-start-title">1. Choose an axis through the airplane</title>
+        <desc id="skewer-start-desc">Side view of a level airplane pointing right. A green dot at its center marks the Y axis pointing out of the page toward you, like looking straight down the skewer.</desc>
+        <text x="16" y="28" fill="#e6edf3" font-size="18" font-weight="bold">1. Put the skewer through</text>
+        <path d="M 50 155 L 115 155 L 145 139 L 215 145 L 269 166 L 213 178 L 104 178 L 70 171 L 50 126 L 66 126 L 86 155 Z" fill="#243a50" stroke="#e6edf3" stroke-width="2.5"/>
+        <circle cx="160" cy="165" r="14" fill="#0d1117" stroke="#43d17a" stroke-width="3"/>
+        <circle cx="160" cy="165" r="5" fill="#43d17a"/>
+        <path d="M 160 148 L 160 82 L 215 82" fill="none" stroke="#43d17a" stroke-width="2"/>
+        <text x="178" y="66" fill="#43d17a" font-size="16">Y axis / skewer</text>
+        <text x="18" y="240" fill="#e6edf3" font-size="16">You are looking along the skewer.</text>
+        <text x="18" y="264" fill="#8b949e" font-size="15">The green dot points toward you.</text>
+      </svg>
+      <svg viewBox="0 0 320 290" role="img" aria-labelledby="skewer-turn-title skewer-turn-desc">
+        <title id="skewer-turn-title">2. Turn 90 degrees around that axis</title>
+        <desc id="skewer-turn-desc">An orange arrow sweeps counterclockwise from right to up around a fixed green center. The nose direction changes by a quarter-turn while the axis stays fixed.</desc>
+        <defs><marker id="concept-turn-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#ffa94d"/></marker></defs>
+        <text x="16" y="28" fill="#e6edf3" font-size="18" font-weight="bold">2. Make a quarter-turn</text>
+        <path d="M 150 173 L 260 173" stroke="#8b949e" stroke-width="3" stroke-dasharray="6 5"/>
+        <path d="M 150 173 L 150 63" stroke="#e6edf3" stroke-width="3"/>
+        <path d="M 240 165 A 90 90 0 0 0 158 83" fill="none" stroke="#ffa94d" stroke-width="4" marker-end="url(#concept-turn-arrow)"/>
+        <circle cx="150" cy="173" r="14" fill="#0d1117" stroke="#43d17a" stroke-width="3"/>
+        <circle cx="150" cy="173" r="5" fill="#43d17a"/>
+        <text x="195" y="122" fill="#ffa94d" font-size="22" font-weight="bold">90°</text>
+        <text x="227" y="199" fill="#8b949e" font-size="15">start</text>
+        <text x="91" y="71" fill="#e6edf3" font-size="15">finish</text>
+        <text x="18" y="240" fill="#e6edf3" font-size="16">The nose moves around the axis.</text>
+        <text x="18" y="264" fill="#8b949e" font-size="15">The skewer stays in the same place.</text>
+      </svg>
+      <svg viewBox="0 0 320 290" role="img" aria-labelledby="skewer-end-title skewer-end-desc">
+        <title id="skewer-end-title">3. Store the resulting turn as a quaternion</title>
+        <desc id="skewer-end-desc">The same airplane is now pointing up, rotated 90 degrees around the green axis. Its center has not moved. The quaternion stores this turn relative to the level starting pose.</desc>
+        <text x="16" y="28" fill="#e6edf3" font-size="18" font-weight="bold">3. Save the new orientation</text>
+        <path d="M 50 155 L 115 155 L 145 139 L 215 145 L 269 166 L 213 178 L 104 178 L 70 171 L 50 126 L 66 126 L 86 155 Z" transform="translate(160 165) rotate(-90) scale(0.85) translate(-160 -165)" fill="#243a50" stroke="#e6edf3" stroke-width="2.5"/>
+        <circle cx="160" cy="165" r="14" fill="#0d1117" stroke="#43d17a" stroke-width="3"/>
+        <circle cx="160" cy="165" r="5" fill="#43d17a"/>
+        <text x="18" y="280" fill="#8b949e" font-size="15">Same center. Different orientation.</text>
+      </svg>
+    </div>
+    <figcaption><strong>One axis + one turn → one quaternion.</strong> The green dot is the end of the imaginary skewer, not another moving part. This side-view sketch shows the positive Y axis pointing toward you, so the positive 90° turn goes counterclockwise. The quaternion below stores that turn relative to the level starting pose.</figcaption>
+  </figure>
+  <p class="formula">q = (0, 0.707, 0, 0.707)</p>
+  <p>Do not worry about memorizing 0.707. The useful point is that this is a perfectly ordinary set of numbers, even at the pose where our Euler controls lined up. A slightly larger turn gives a slightly different quaternion.</p>
+  <h3>How do the 3D axes map into quaternion numbers?</h3>
+  <p><strong>The airplane still lives in ordinary 3D space.</strong> A quaternion is not a new spatial frame with a fourth direction. It describes the rotation between two frames: here, the airplane’s local axes and the fixed world axes.</p>
+  <p>Use capital <strong>X, Y, Z</strong> for spatial axes, and lowercase <strong>x, y, z, w</strong> for the four stored quaternion components. If the rotation axis is the unit vector u = (u<sub>X</sub>, u<sub>Y</sub>, u<sub>Z</sub>), the mapping is:</p>
+  <p class="formula">x = u<sub>X</sub> sin(θ/2)<br>y = u<sub>Y</sub> sin(θ/2)<br>z = u<sub>Z</sub> sin(θ/2)<br>w = cos(θ/2)</p>
+  <p>So a rotation axis pointing along X contributes to x; an axis along Y contributes to y; an axis along Z contributes to z. A tilted axis contributes to several components. All three are scaled by the <em>same</em> half-angle factor.</p>
+  <div class="table-scroll"><table class="equiv">
+    <caption>Four examples of a positive 90° turn: sin(45°) = cos(45°) ≈ 0.707</caption>
+    <thead><tr><th>Spatial rotation axis</th><th>Unit direction u</th><th>Quaternion (x, y, z, w)</th></tr></thead>
+    <tbody>
+      <tr><td>X</td><td>(1, 0, 0)</td><td>(0.707, 0, 0, 0.707)</td></tr>
+      <tr><td>Y</td><td>(0, 1, 0)</td><td>(0, 0.707, 0, 0.707)</td></tr>
+      <tr><td>Z</td><td>(0, 0, 1)</td><td>(0, 0, 0.707, 0.707)</td></tr>
+      <tr><td>Halfway between X and Y</td><td>(1/√2, 1/√2, 0)</td><td>(0.5, 0.5, 0, 0.707)</td></tr>
+    </tbody>
+  </table></div>
+  <p>The last row is <strong>one turn around a diagonal axis</strong>. It is not a 90° X turn followed by a 90° Y turn. Those sequential turns would need quaternion multiplication.</p>
+  <h3>Where do the airplane’s axes point after the turn?</h3>
+  <p>This is a different question from choosing the rotation axis. The airplane has three local directions: <strong>X = forward</strong>, <strong>Y = sideways</strong>, and <strong>Z = the remaining perpendicular direction</strong>. To find each direction in world coordinates, rotate it with the same quaternion.</p>
+  <p>For this demo, q maps a local vector into the world frame. Put a vector v = (v<sub>X</sub>, v<sub>Y</sub>, v<sub>Z</sub>) into a quaternion with w = 0, then apply:</p>
+  <p class="formula">p = (v<sub>X</sub>, v<sub>Y</sub>, v<sub>Z</sub>, 0)<br>p′ = q p q⁻¹<br>world vector = the first three components of p′</p>
+  <p>Here q⁻¹ means the inverse of q. For a unit quaternion in our (x, y, z, w) order, q⁻¹ = (−x, −y, −z, w). Multiplication uses quaternion rules, not component-by-component multiplication. To map a world vector back into the local frame, reverse the operation: q⁻¹ p q.</p>
+  <div class="table-scroll"><table class="equiv">
+    <caption>Our +90° Y-axis example: q = (0, 1/√2, 0, 1/√2)</caption>
+    <thead><tr><th>Local direction before the turn</th><th>World direction after q p q⁻¹</th><th>What happened?</th></tr></thead>
+    <tbody>
+      <tr><td>X = (1, 0, 0)</td><td>(0, 0, −1) = −Z</td><td>The airplane’s forward direction now points along world −Z.</td></tr>
+      <tr><td>Y = (0, 1, 0)</td><td>(0, 1, 0) = +Y</td><td>The rotation axis itself stays fixed.</td></tr>
+      <tr><td>Z = (0, 0, 1)</td><td>(1, 0, 0) = +X</td><td>The third local axis turns along with the airplane.</td></tr>
+    </tbody>
+  </table></div>
+  <p>These three output vectors are the <strong>columns</strong> of the rotation matrix shown in the readout. For this example:</p>
+  <p class="formula">R = [ 0  0  1 ]<br>    [ 0  1  0 ]<br>    [−1  0  0 ]<br><br>R × (a, b, c) = (c, b, −a)</p>
+  <p>For example, a point at local (2, 1, 0) rotates to world (0, 1, −2), assuming the origins coincide. Rotation changes its direction without changing its distance from the center. Translation—moving the airplane’s center—is a separate operation.</p>
+  <p><strong>Connect this to the pictures:</strong> in the side-view sketch, +Y points toward you, +X points right, and −Z points up. That is why the nose moves from right to up. In section 4, the orange, green, and blue lines show the rotated local X, Y, and Z axes respectively. They stay perpendicular in 3D, even when projection makes their screen angles look different.</p>
+  <h3>Why does that help with gimbal lock?</h3>
+  <p>Go back to experiment 3: two angle readings changed, but the airplane stayed still. The problem was how those controls described the motion.</p>
+  <p>With quaternions, the computer keeps the airplane’s orientation and combines it with whatever turn you ask for next. It does not have to untangle a separate roll and yaw at the vertical pose first. You can still request a small turn around any spatial direction.</p>
+  <p><strong>The important distinction:</strong> quaternions avoid the problem in how software represents and updates orientation. They do not repair a physical set of rings that has locked, and converting back to Euler angles still gives ambiguous roll/yaw readings at that pose.</p>
+  <h3>And why are they useful for animation?</h3>
+  <p>Suppose you save two airplane poses and want to move smoothly between them. A method called <strong>SLERP</strong> fills in the poses along a shortest rotation path. With steady playback, the airplane turns at a steady speed instead of separately adjusting three angle controls.</p>
+  <p>In section 4, drag the slider from 60° to 120°. Watch the airplane pass through 90° and keep turning. Passing through 90° alone is possible with Euler angles too; the quaternion advantage is that further rotation updates do not rely on the Euler controls staying independent.</p>
+  <details>
+    <summary><strong>Optional: where do those numbers come from?</strong></summary>
+    <p>Use a direction vector u for the skewer, scaled so its length is 1. Let θ (theta) be the angle you want to turn. The recipe is:</p>
+    <p class="formula">(x, y, z) = u × sin(θ/2)<br>w = cos(θ/2)</p>
+    <p>For our Y-axis example, u = (0, 1, 0) and θ = 90°. Half the angle is 45°, and both sin(45°) and cos(45°) are about 0.707. That gives (0, 0.707, 0, 0.707).</p>
+    <p>The four numbers obey x² + y² + z² + w² = 1. This makes it a <strong>unit quaternion</strong>. The constraint is why four stored numbers do not mean four independent rotation controls.</p>
+    <p>The half-angle comes from the way a quaternion is applied: the vector being rotated is multiplied on both sides, as q p q⁻¹. This operation turns it by twice the angle encoded inside q.</p>
+    <p>You may see q written as w + xi + yj + zk. That is another notation for the same four components. Also, reversing all four signs gives the same orientation: q and −q describe the same turn.</p>
+    <p>To combine turns, multiply their quaternions. Order matters, just as tipping an airplane and then rolling it can give a different result from rolling it and then tipping it.</p>
+  </details>
+</section>
+<section class="lesson card" aria-labelledby="crossing-heading">
+  <span class="step">04 / Through the singularity</span>
+  <h2 id="crossing-heading">A quaternion keeps turning through 90°</h2>
+  <div class="quaternion-layout">
+    <div><svg id="quaternion-stage" viewBox="0 0 720 720" role="img" aria-label="Quaternion-driven vehicle with three perpendicular body axes"></svg>
+      <label for="quaternion-slider">Rotation about Y: 60° → 120°</label>
+      <input id="quaternion-slider" type="range" min="0" max="60" value="30" step="1" style="width:100%">
+      <div class="controls"><button class="btn" id="quaternion-play" type="button">Play quaternion motion</button><output id="quaternion-angle" for="quaternion-slider"></output></div>
+    </div>
+    <div><h3>Same vertical pose, continuous motion</h3><p>Drag across 90°. The white vehicle moves smoothly. These colored lines are the vehicle’s <strong>body axes</strong>, which stay perpendicular in 3D; they are not the nested gimbal control axes above.</p>
+      <p id="quaternion-caption" aria-live="polite"></p>
+      <p class="formula" id="quaternion-value"></p>
+      <p>At θ = 90°, q ≈ (0, 0.707, 0, 0.707) in (x, y, z, w) order. No component becomes undefined, and the next rotation is still well-defined.</p>
+      <p>This example blends the 60° and 120° endpoint quaternions with SLERP. A simple Euler pitch sweep can also pass through 90°; the benefit is that quaternion updates do not depend on three Euler controls remaining independent.</p>
+      <p><strong>In practice:</strong> keep orientation as a unit quaternion, compose rotation updates with quaternion multiplication, and normalize when numerical drift requires it. Use Euler angles for display when useful, knowing they are ambiguous at the singularity.</p>
+    </div>
+  </div>
+</section>
+<footer class="lesson"><p class="hint">Convention: R = Rz(yaw) Ry(pitch) Rx(roll). Applied to a vector, the rightmost rotation acts first. Geometry and numerical readouts are calculated in Rust; both demonstrations work offline.</p><p class="hint">Further reading: <a href="https://cseweb.ucsd.edu/~alchern/teaching/cse167_wi25/3-1Rotation3D2.pdf">UC San Diego lecture: 3D rotations and quaternions</a>.</p></footer>
 "##;
 
 /// Opening tag of the script element that carries the frame data.
@@ -1232,6 +1475,7 @@ const RENDERER_SCRIPT: &str = r##"<script>
     return;
   }
 
+  let frames = data.experiments[0].frames;
   const NS = "http://www.w3.org/2000/svg";
   const stage = document.getElementById("stage");
   stage.setAttribute("viewBox", "0 0 " + data.viewportPixels + " " + data.viewportPixels);
@@ -1256,7 +1500,7 @@ const RENDERER_SCRIPT: &str = r##"<script>
   // the same order (guaranteed by the exporter), so the elements are built once.
   // Rings are split in two: a dim full ring at low opacity plus a bright arc for
   // the half that passes in front, which gives the flat SVG a sense of depth.
-  const shapeElements = data.frames[0].shapes.map((shape) => ({
+  const shapeElements = frames[0].shapes.map((shape) => ({
     kind: shape.kind,
     closed: shape.closed,
     main: polyline(
@@ -1271,7 +1515,7 @@ const RENDERER_SCRIPT: &str = r##"<script>
       axisElements[entry.kind] = entry.main;
     }
   });
-  const labelElements = data.frames[0].labels.map(() => {
+  const labelElements = frames[0].labels.map(() => {
     const element = document.createElementNS(NS, "text");
     element.setAttribute("class", "axis-label");
     frontLayer.appendChild(element);
@@ -1311,7 +1555,7 @@ const RENDERER_SCRIPT: &str = r##"<script>
   const axisClass = (kind, state) => "k-" + kind + " line" + state;
 
   function drawFrame(index) {
-    const frame = data.frames[index];
+    const frame = frames[index];
     frame.shapes.forEach((shape, position) => {
       const element = shapeElements[position];
       if (!element) { return; }
@@ -1414,17 +1658,17 @@ const RENDERER_SCRIPT: &str = r##"<script>
 
   const slider = document.getElementById("slider");
   const playButton = document.getElementById("play");
-  slider.max = String(data.frames.length - 1);
+  slider.max = String(frames.length - 1);
 
   let current = 0;
   let direction = 1;
   let timer = null;
 
   function show(index) {
-    current = Math.max(0, Math.min(data.frames.length - 1, index));
+    current = Math.max(0, Math.min(frames.length - 1, index));
     slider.value = String(current);
     drawFrame(current);
-    updatePanel(data.frames[current]);
+    updatePanel(frames[current]);
   }
 
   function stop() {
@@ -1440,7 +1684,7 @@ const RENDERER_SCRIPT: &str = r##"<script>
     // Ping-pong playback: sweep into the singularity, then back out again.
     timer = setInterval(() => {
       let next = current + direction;
-      if (next >= data.frames.length || next < 0) {
+      if (next >= frames.length || next < 0) {
         direction = -direction;
         next = current + direction;
       }
@@ -1457,6 +1701,7 @@ const RENDERER_SCRIPT: &str = r##"<script>
     show(Number(slider.value));
   });
   document.addEventListener("keydown", (event) => {
+    if (event.target.matches("input, select, button, a")) { return; }
     if (event.key === " ") {
       event.preventDefault();
       if (timer === null) { start(); } else { stop(); }
@@ -1469,7 +1714,62 @@ const RENDERER_SCRIPT: &str = r##"<script>
     }
   });
 
-  show(0);
+  const experiment = document.getElementById("experiment");
+  data.experiments.forEach((item, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = item.title;
+    experiment.appendChild(option);
+  });
+  function chooseExperiment() {
+    stop();
+    direction = 1;
+    const selected = data.experiments[Number(experiment.value)];
+    frames = selected.frames;
+    slider.max = String(frames.length - 1);
+    slider.setAttribute("aria-label", selected.controlLabel);
+    setText("control-label", selected.controlLabel);
+    setText("experiment-explanation", selected.explanation);
+    show(0);
+  }
+  experiment.addEventListener("change", chooseExperiment);
+  chooseExperiment();
+
+  const qStage = document.getElementById("quaternion-stage");
+  qStage.setAttribute("viewBox", "0 0 " + data.viewportPixels + " " + data.viewportPixels);
+  const qShapes = data.quaternionFrames[0].shapes.map((shape) =>
+    polyline("k-" + shape.kind + " line", qStage));
+  const qSlider = document.getElementById("quaternion-slider");
+  const qPlay = document.getElementById("quaternion-play");
+  let qTimer = null;
+  let qDirection = 1;
+  function showQuaternion() {
+    const frame = data.quaternionFrames[Number(qSlider.value)];
+    frame.shapes.forEach((shape, index) => qShapes[index].setAttribute("points", toPoints(shape.points, shape.closed)));
+    setText("quaternion-angle", frame.angleDegrees + "° about Y");
+    setText("quaternion-value", "q (x, y, z, w) = (" + frame.quaternion.map(fixed).join(", ") + ")");
+    setText("quaternion-caption", frame.angleDegrees === 90
+      ? "At 90°: Euler roll/yaw controls would align here. The quaternion remains a valid orientation."
+      : (frame.angleDegrees < 90 ? "Approaching the vertical pose." : "Past the vertical pose: rotation continues smoothly."));
+  }
+  function stopQuaternion() {
+    clearInterval(qTimer);
+    qTimer = null;
+    qPlay.textContent = "Play quaternion motion";
+  }
+  qSlider.addEventListener("input", () => { stopQuaternion(); showQuaternion(); });
+  qPlay.addEventListener("click", () => {
+    if (qTimer !== null) { stopQuaternion(); return; }
+    stop();
+    qPlay.textContent = "Pause quaternion motion";
+    qTimer = setInterval(() => {
+      let next = Number(qSlider.value) + qDirection;
+      if (next > 60 || next < 0) { qDirection *= -1; next = Number(qSlider.value) + qDirection; }
+      qSlider.value = String(next);
+      showQuaternion();
+    }, 80);
+  });
+  showQuaternion();
 })();
 </script>
 "##;
@@ -1483,6 +1783,53 @@ const HTML_TAIL: &str = r##"</body>
 mod tests {
     use super::*;
     use std::f64::consts::PI;
+
+    #[test]
+    fn experiments_show_both_singularities_and_control_redundancy() {
+        let experiments = build_experiments(&Camera::standard());
+        assert_eq!(
+            experiments[1].frames.last().unwrap().metrics.euler_degrees[1],
+            -90.0
+        );
+        assert!(experiments[1].frames.last().unwrap().metrics.gimbal_lock);
+        let orientation = |frame: &DemoFrame| {
+            let [roll, pitch, yaw] = frame.metrics.euler_degrees;
+            QuaternionMath::from_euler_angles(&euler_from_degrees((roll, pitch, yaw)))
+        };
+        let locked = &experiments[2].frames;
+        let reference = orientation(&locked[0]);
+        for frame in locked {
+            assert!(QuaternionMath::same_orientation(
+                &reference,
+                &orientation(frame)
+            ));
+        }
+        let near = &experiments[3].frames;
+        let movement = QuaternionMath::angular_distance(
+            &orientation(&near[0]),
+            &orientation(near.last().unwrap()),
+        );
+        assert!(movement > 0.01 && movement < 0.2);
+        assert!(near.iter().all(|frame| !frame.metrics.gimbal_lock));
+    }
+
+    #[test]
+    fn quaternion_motion_crosses_vertical_with_equal_angular_steps() {
+        let frames = build_quaternion_frames(&Camera::standard());
+        let axis = Vector3::new(0.0, 1.0, 0.0);
+        for (index, frame) in frames.iter().enumerate() {
+            let q =
+                QuaternionMath::create_unit_quaternion(axis, (60.0 + index as f64).to_radians());
+            assert_eq!(frame.quaternion, quaternion_export(&q));
+            let expected = Point3D::new(0.95 * GIMBAL_BODY_SCALE, 0.0, 0.0).rotated_by(&q);
+            let projected = Camera::standard()
+                .project(&expected)
+                .to_export_array(VISUALIZATION_PROJECTION_DECIMALS);
+            assert_eq!(frame.shapes[0].points[0], projected);
+        }
+        assert_eq!(frames[30].angle_degrees, 90.0);
+        assert_eq!(frames[30].quaternion, [0.0, 0.707, 0.0, 0.707]);
+    }
 
     /// The camera must be orthonormal: it may rotate and scale the scene, but it
     /// must not shear it, or the gimbal-lock collapse on screen would be a lie.

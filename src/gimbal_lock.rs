@@ -32,7 +32,7 @@ pub struct GimbalLockAnalysis {
     pub description: String,
     /// Number of degrees of freedom lost (0, 1, or 2)
     pub loss_of_degree_of_freedom: usize,
-}
+} // GimbalLockAnalysis
 
 /// Types of gimbal lock singularities
 ///
