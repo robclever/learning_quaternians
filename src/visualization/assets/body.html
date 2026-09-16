@@ -1,0 +1,195 @@
+<header>
+  <h1 id="title"></h1>
+  <p class="sub" id="subtitle"></p>
+</header>
+<section class="lesson card" aria-labelledby="intro-heading">
+  <span class="step">01 / The problem</span>
+  <h2 id="intro-heading">What is gimbal lock?</h2>
+  <p>Imagine a camera carried by three nested rings. Each ring gives you a rotation control: <strong>yaw</strong> about Z, <strong>pitch</strong> about Y, and <strong>roll</strong> about X. Normally, their combined motions let you adjust orientation in three independent directions.</p>
+  <div class="lesson-grid">
+    <div><h3>Three controls</h3><p>Euler angles describe a sequence of turns. Here the outer yaw ring carries the pitch ring, which carries the roll ring. Turning an outer ring also moves the axes inside it.</p></div>
+    <div><h3>Two axes align</h3><p>At pitch +90° or −90°, the roll axis lies on the yaw axis. Those controls now turn about the same line. They cannot provide three independent small rotation adjustments.</p></div>
+    <div><h3>One direction is lost</h3><p>The object still has a valid orientation. The trouble is the controls: different roll/yaw settings can describe exactly the same pose. A camera pointing vertically or a three-ring platform can encounter this configuration.</p></div>
+  </div>
+  <p><strong>Why quaternions help:</strong> software can store and update orientation directly with a unit quaternion, avoiding this singularity in Euler coordinates. A quaternion does not mechanically unlock physical rings, and converting back to Euler controls brings the singularity back.</p>
+</section>
+<section class="lesson" aria-labelledby="examples-heading"><span class="step">02 / Try the controls</span><h2 id="examples-heading">Four ways to see the problem</h2><p>Choose an experiment, then drag its slider or press Play. Blue is yaw, green is pitch, orange is roll; the white marker is the vehicle.</p></section>
+<main class="layout">
+  <section class="card">
+    <label for="experiment"><strong>Experiment</strong></label>
+    <select id="experiment"></select>
+    <p id="experiment-explanation"></p>
+    <svg id="stage" viewBox="0 0 720 720" role="img" aria-label="Three nested gimbal rings with their rotation axes and a vehicle marker"></svg>
+    <p class="caption" id="caption"></p>
+    <label id="control-label" for="slider">Pitch sweep</label>
+    <div class="controls">
+      <button class="btn" id="play" type="button">Play</button>
+      <input id="slider" type="range" min="0" max="1" step="1" value="0" aria-label="Pitch angle">
+      <span class="frame-label" id="frame-label"></span>
+    </div>
+    <p class="hint">Space plays or pauses, and the left/right arrow keys step one frame at a time - handy while presenting.</p>
+  </section>
+  <section class="stack">
+    <div class="card">
+      <div class="status-row">
+        <span class="pill safe" id="status-pill">safe</span>
+        <span class="muted" id="status-text"></span>
+      </div>
+      <div class="stats">
+        <div class="stat"><span class="k">roll</span><span class="v" id="rd-roll"></span></div>
+        <div class="stat"><span class="k">pitch</span><span class="v" id="rd-pitch"></span></div>
+        <div class="stat"><span class="k">yaw</span><span class="v" id="rd-yaw"></span></div>
+        <div class="stat"><span class="k">safety factor</span><span class="v" id="rd-safety"></span></div>
+        <div class="stat wide"><span class="k">quaternion (x, y, z, w)</span><span class="v mono" id="rd-quaternion"></span></div>
+        <div class="stat wide"><span class="k">angle between the roll axis and the yaw axis</span><span class="v" id="rd-axis"></span></div>
+        <div class="stat"><span class="k">gimbal lock</span><span class="v" id="rd-lock"></span></div>
+        <div class="stat"><span class="k">degrees of freedom lost</span><span class="v" id="rd-dof"></span></div>
+        <div class="stat wide"><span class="k">singularity</span><span class="v" id="rd-singularity"></span></div>
+        <div class="stat wide"><span class="k">rotation matrix (rows)</span><span class="v mono" id="rd-matrix"></span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>A fixed example at +90°</h2>
+      <p class="muted" id="equiv-intro"></p>
+      <div class="table-scroll"><table class="equiv">
+        <thead>
+          <tr><th>roll</th><th>pitch</th><th>yaw</th><th>yaw - roll</th><th>quaternion (x, y, z, w)</th><th>same?</th></tr>
+        </thead>
+        <tbody id="equiv-body"></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>What to watch</h2>
+      <ul class="notes" id="notes"></ul>
+    </div>
+  </section>
+</main>
+<section class="lesson card" aria-labelledby="quaternion-heading">
+  <span class="step">03 / A different representation</span>
+  <h2 id="quaternion-heading">Quaternions, without the math refresher</h2>
+  <p><strong>Imagine holding a toy airplane.</strong> You want to describe which way it is pointing and how much it is tilted. That is its <em>orientation</em>. Its position in the room does not matter here.</p>
+  <div class="lesson-grid">
+    <div><h3>Euler angles: three turning instructions</h3><p>You could say, “Turn this far left, tip this far up, then roll this far.” Those are the yaw, pitch, and roll controls we used above.</p><p>The catch is that these turns affect the directions of the later controls. When two control axes line up, you effectively have two knobs doing the same job.</p></div>
+    <div><h3>Another way: one imaginary skewer</h3><p>Push an imaginary skewer through the airplane’s center. Point that skewer in the right direction, then turn the airplane around it.</p><p>Starting from a reference pose, you can reach any final orientation with one carefully chosen skewer direction and one amount of turn.</p></div>
+    <div><h3>A quaternion: four numbers storing that turn</h3><p>A rotation quaternion is a package of <strong>four numbers</strong> that encodes that same skewer-and-turn idea.</p><p>The numbers are arranged to make it easy for a computer to combine turns and smoothly move between orientations. You generally let a math library calculate them.</p></div>
+  </div>
+  <h3>So what do the four numbers mean?</h3>
+  <p>We label them <strong>(x, y, z, w)</strong>. The first three point along the imaginary skewer, but their size also depends on the amount of turn. The last number, w, helps encode that amount. <strong>They work together: x, y, and z are not three separate turn angles, and w is not a fourth direction.</strong></p>
+  <p>You do not have to read a quaternion and immediately picture the airplane. Think of these numbers as a useful storage format. The animation is what makes the stored orientation understandable.</p>
+  <h3>A concrete example</h3>
+  <p>Start with the airplane level. Put the skewer along its left-to-right axis—the Y axis in this demo—and turn it a quarter-turn, or <strong>90°</strong>. The quaternion for that turn is approximately:</p>
+  <figure class="concept-picture">
+    <div class="concept-panels">
+      <svg viewBox="0 0 320 290" role="img" aria-labelledby="skewer-start-title skewer-start-desc">
+        <title id="skewer-start-title">1. Choose an axis through the airplane</title>
+        <desc id="skewer-start-desc">Side view of a level airplane pointing right. A green dot at its center marks the Y axis pointing out of the page toward you, like looking straight down the skewer.</desc>
+        <text x="16" y="28" fill="#e6edf3" font-size="18" font-weight="bold">1. Put the skewer through</text>
+        <path d="M 50 155 L 115 155 L 145 139 L 215 145 L 269 166 L 213 178 L 104 178 L 70 171 L 50 126 L 66 126 L 86 155 Z" fill="#243a50" stroke="#e6edf3" stroke-width="2.5"/>
+        <circle cx="160" cy="165" r="14" fill="#0d1117" stroke="#43d17a" stroke-width="3"/>
+        <circle cx="160" cy="165" r="5" fill="#43d17a"/>
+        <path d="M 160 148 L 160 82 L 215 82" fill="none" stroke="#43d17a" stroke-width="2"/>
+        <text x="178" y="66" fill="#43d17a" font-size="16">Y axis / skewer</text>
+        <text x="18" y="240" fill="#e6edf3" font-size="16">You are looking along the skewer.</text>
+        <text x="18" y="264" fill="#8b949e" font-size="15">The green dot points toward you.</text>
+      </svg>
+      <svg viewBox="0 0 320 290" role="img" aria-labelledby="skewer-turn-title skewer-turn-desc">
+        <title id="skewer-turn-title">2. Turn 90 degrees around that axis</title>
+        <desc id="skewer-turn-desc">An orange arrow sweeps counterclockwise from right to up around a fixed green center. The nose direction changes by a quarter-turn while the axis stays fixed.</desc>
+        <defs><marker id="concept-turn-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#ffa94d"/></marker></defs>
+        <text x="16" y="28" fill="#e6edf3" font-size="18" font-weight="bold">2. Make a quarter-turn</text>
+        <path d="M 150 173 L 260 173" stroke="#8b949e" stroke-width="3" stroke-dasharray="6 5"/>
+        <path d="M 150 173 L 150 63" stroke="#e6edf3" stroke-width="3"/>
+        <path d="M 240 165 A 90 90 0 0 0 158 83" fill="none" stroke="#ffa94d" stroke-width="4" marker-end="url(#concept-turn-arrow)"/>
+        <circle cx="150" cy="173" r="14" fill="#0d1117" stroke="#43d17a" stroke-width="3"/>
+        <circle cx="150" cy="173" r="5" fill="#43d17a"/>
+        <text x="195" y="122" fill="#ffa94d" font-size="22" font-weight="bold">90°</text>
+        <text x="227" y="199" fill="#8b949e" font-size="15">start</text>
+        <text x="91" y="71" fill="#e6edf3" font-size="15">finish</text>
+        <text x="18" y="240" fill="#e6edf3" font-size="16">The nose moves around the axis.</text>
+        <text x="18" y="264" fill="#8b949e" font-size="15">The skewer stays in the same place.</text>
+      </svg>
+      <svg viewBox="0 0 320 290" role="img" aria-labelledby="skewer-end-title skewer-end-desc">
+        <title id="skewer-end-title">3. Store the resulting turn as a quaternion</title>
+        <desc id="skewer-end-desc">The same airplane is now pointing up, rotated 90 degrees around the green axis. Its center has not moved. The quaternion stores this turn relative to the level starting pose.</desc>
+        <text x="16" y="28" fill="#e6edf3" font-size="18" font-weight="bold">3. Save the new orientation</text>
+        <path d="M 50 155 L 115 155 L 145 139 L 215 145 L 269 166 L 213 178 L 104 178 L 70 171 L 50 126 L 66 126 L 86 155 Z" transform="translate(160 165) rotate(-90) scale(0.85) translate(-160 -165)" fill="#243a50" stroke="#e6edf3" stroke-width="2.5"/>
+        <circle cx="160" cy="165" r="14" fill="#0d1117" stroke="#43d17a" stroke-width="3"/>
+        <circle cx="160" cy="165" r="5" fill="#43d17a"/>
+        <text x="18" y="280" fill="#8b949e" font-size="15">Same center. Different orientation.</text>
+      </svg>
+    </div>
+    <figcaption><strong>One axis + one turn → one quaternion.</strong> The green dot is the end of the imaginary skewer, not another moving part. This side-view sketch shows the positive Y axis pointing toward you, so the positive 90° turn goes counterclockwise. The quaternion below stores that turn relative to the level starting pose.</figcaption>
+  </figure>
+  <p class="formula">q = (0, 0.707, 0, 0.707)</p>
+  <p>Do not worry about memorizing 0.707. The useful point is that this is a perfectly ordinary set of numbers, even at the pose where our Euler controls lined up. A slightly larger turn gives a slightly different quaternion.</p>
+  <h3>How do the 3D axes map into quaternion numbers?</h3>
+  <p><strong>The airplane still lives in ordinary 3D space.</strong> A quaternion is not a new spatial frame with a fourth direction. It describes the rotation between two frames: here, the airplane’s local axes and the fixed world axes.</p>
+  <p>Use capital <strong>X, Y, Z</strong> for spatial axes, and lowercase <strong>x, y, z, w</strong> for the four stored quaternion components. If the rotation axis is the unit vector u = (u<sub>X</sub>, u<sub>Y</sub>, u<sub>Z</sub>), the mapping is:</p>
+  <p class="formula">x = u<sub>X</sub> sin(θ/2)<br>y = u<sub>Y</sub> sin(θ/2)<br>z = u<sub>Z</sub> sin(θ/2)<br>w = cos(θ/2)</p>
+  <p>So a rotation axis pointing along X contributes to x; an axis along Y contributes to y; an axis along Z contributes to z. A tilted axis contributes to several components. All three are scaled by the <em>same</em> half-angle factor.</p>
+  <div class="table-scroll"><table class="equiv">
+    <caption>Four examples of a positive 90° turn: sin(45°) = cos(45°) ≈ 0.707</caption>
+    <thead><tr><th>Spatial rotation axis</th><th>Unit direction u</th><th>Quaternion (x, y, z, w)</th></tr></thead>
+    <tbody>
+      <tr><td>X</td><td>(1, 0, 0)</td><td>(0.707, 0, 0, 0.707)</td></tr>
+      <tr><td>Y</td><td>(0, 1, 0)</td><td>(0, 0.707, 0, 0.707)</td></tr>
+      <tr><td>Z</td><td>(0, 0, 1)</td><td>(0, 0, 0.707, 0.707)</td></tr>
+      <tr><td>Halfway between X and Y</td><td>(1/√2, 1/√2, 0)</td><td>(0.5, 0.5, 0, 0.707)</td></tr>
+    </tbody>
+  </table></div>
+  <p>The last row is <strong>one turn around a diagonal axis</strong>. It is not a 90° X turn followed by a 90° Y turn. Those sequential turns would need quaternion multiplication.</p>
+  <h3>Where do the airplane’s axes point after the turn?</h3>
+  <p>This is a different question from choosing the rotation axis. The airplane has three local directions: <strong>X = forward</strong>, <strong>Y = sideways</strong>, and <strong>Z = the remaining perpendicular direction</strong>. To find each direction in world coordinates, rotate it with the same quaternion.</p>
+  <p>For this demo, q maps a local vector into the world frame. Put a vector v = (v<sub>X</sub>, v<sub>Y</sub>, v<sub>Z</sub>) into a quaternion with w = 0, then apply:</p>
+  <p class="formula">p = (v<sub>X</sub>, v<sub>Y</sub>, v<sub>Z</sub>, 0)<br>p′ = q p q⁻¹<br>world vector = the first three components of p′</p>
+  <p>Here q⁻¹ means the inverse of q. For a unit quaternion in our (x, y, z, w) order, q⁻¹ = (−x, −y, −z, w). Multiplication uses quaternion rules, not component-by-component multiplication. To map a world vector back into the local frame, reverse the operation: q⁻¹ p q.</p>
+  <div class="table-scroll"><table class="equiv">
+    <caption>Our +90° Y-axis example: q = (0, 1/√2, 0, 1/√2)</caption>
+    <thead><tr><th>Local direction before the turn</th><th>World direction after q p q⁻¹</th><th>What happened?</th></tr></thead>
+    <tbody>
+      <tr><td>X = (1, 0, 0)</td><td>(0, 0, −1) = −Z</td><td>The airplane’s forward direction now points along world −Z.</td></tr>
+      <tr><td>Y = (0, 1, 0)</td><td>(0, 1, 0) = +Y</td><td>The rotation axis itself stays fixed.</td></tr>
+      <tr><td>Z = (0, 0, 1)</td><td>(1, 0, 0) = +X</td><td>The third local axis turns along with the airplane.</td></tr>
+    </tbody>
+  </table></div>
+  <p>These three output vectors are the <strong>columns</strong> of the rotation matrix shown in the readout. For this example:</p>
+  <p class="formula">R = [ 0  0  1 ]<br>    [ 0  1  0 ]<br>    [−1  0  0 ]<br><br>R × (a, b, c) = (c, b, −a)</p>
+  <p>For example, a point at local (2, 1, 0) rotates to world (0, 1, −2), assuming the origins coincide. Rotation changes its direction without changing its distance from the center. Translation—moving the airplane’s center—is a separate operation.</p>
+  <p><strong>Connect this to the pictures:</strong> in the side-view sketch, +Y points toward you, +X points right, and −Z points up. That is why the nose moves from right to up. In section 4, the orange, green, and blue lines show the rotated local X, Y, and Z axes respectively. They stay perpendicular in 3D, even when projection makes their screen angles look different.</p>
+  <h3>Why does that help with gimbal lock?</h3>
+  <p>Go back to experiment 3: two angle readings changed, but the airplane stayed still. The problem was how those controls described the motion.</p>
+  <p>With quaternions, the computer keeps the airplane’s orientation and combines it with whatever turn you ask for next. It does not have to untangle a separate roll and yaw at the vertical pose first. You can still request a small turn around any spatial direction.</p>
+  <p><strong>The important distinction:</strong> quaternions avoid the problem in how software represents and updates orientation. They do not repair a physical set of rings that has locked, and converting back to Euler angles still gives ambiguous roll/yaw readings at that pose.</p>
+  <h3>And why are they useful for animation?</h3>
+  <p>Suppose you save two airplane poses and want to move smoothly between them. A method called <strong>SLERP</strong> fills in the poses along a shortest rotation path. With steady playback, the airplane turns at a steady speed instead of separately adjusting three angle controls.</p>
+  <p>In section 4, drag the slider from 60° to 120°. Watch the airplane pass through 90° and keep turning. Passing through 90° alone is possible with Euler angles too; the quaternion advantage is that further rotation updates do not rely on the Euler controls staying independent.</p>
+  <details>
+    <summary><strong>Optional: where do those numbers come from?</strong></summary>
+    <p>Use a direction vector u for the skewer, scaled so its length is 1. Let θ (theta) be the angle you want to turn. The recipe is:</p>
+    <p class="formula">(x, y, z) = u × sin(θ/2)<br>w = cos(θ/2)</p>
+    <p>For our Y-axis example, u = (0, 1, 0) and θ = 90°. Half the angle is 45°, and both sin(45°) and cos(45°) are about 0.707. That gives (0, 0.707, 0, 0.707).</p>
+    <p>The four numbers obey x² + y² + z² + w² = 1. This makes it a <strong>unit quaternion</strong>. The constraint is why four stored numbers do not mean four independent rotation controls.</p>
+    <p>The half-angle comes from the way a quaternion is applied: the vector being rotated is multiplied on both sides, as q p q⁻¹. This operation turns it by twice the angle encoded inside q.</p>
+    <p>You may see q written as w + xi + yj + zk. That is another notation for the same four components. Also, reversing all four signs gives the same orientation: q and −q describe the same turn.</p>
+    <p>To combine turns, multiply their quaternions. Order matters, just as tipping an airplane and then rolling it can give a different result from rolling it and then tipping it.</p>
+  </details>
+</section>
+<section class="lesson card" aria-labelledby="crossing-heading">
+  <span class="step">04 / Through the singularity</span>
+  <h2 id="crossing-heading">A quaternion keeps turning through 90°</h2>
+  <div class="quaternion-layout">
+    <div><svg id="quaternion-stage" viewBox="0 0 720 720" role="img" aria-label="Quaternion-driven vehicle with three perpendicular body axes"></svg>
+      <label for="quaternion-slider">Rotation about Y: 60° → 120°</label>
+      <input id="quaternion-slider" type="range" min="0" max="60" value="30" step="1" style="width:100%">
+      <div class="controls"><button class="btn" id="quaternion-play" type="button">Play quaternion motion</button><output id="quaternion-angle" for="quaternion-slider"></output></div>
+    </div>
+    <div><h3>Same vertical pose, continuous motion</h3><p>Drag across 90°. The white vehicle moves smoothly. These colored lines are the vehicle’s <strong>body axes</strong>, which stay perpendicular in 3D; they are not the nested gimbal control axes above.</p>
+      <p id="quaternion-caption" aria-live="polite"></p>
+      <p class="formula" id="quaternion-value"></p>
+      <p>At θ = 90°, q ≈ (0, 0.707, 0, 0.707) in (x, y, z, w) order. No component becomes undefined, and the next rotation is still well-defined.</p>
+      <p>This example blends the 60° and 120° endpoint quaternions with SLERP. A simple Euler pitch sweep can also pass through 90°; the benefit is that quaternion updates do not depend on three Euler controls remaining independent.</p>
+      <p><strong>In practice:</strong> keep orientation as a unit quaternion, compose rotation updates with quaternion multiplication, and normalize when numerical drift requires it. Use Euler angles for display when useful, knowing they are ambiguous at the singularity.</p>
+    </div>
+  </div>
+</section>
+<footer class="lesson"><p class="hint">Convention: R = Rz(yaw) Ry(pitch) Rx(roll). Applied to a vector, the rightmost rotation acts first. Geometry and numerical readouts are calculated in Rust; both demonstrations work offline.</p><p class="hint">Further reading: <a href="https://cseweb.ucsd.edu/~alchern/teaching/cse167_wi25/3-1Rotation3D2.pdf">UC San Diego lecture: 3D rotations and quaternions</a>.</p></footer>

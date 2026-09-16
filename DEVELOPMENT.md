@@ -62,7 +62,15 @@ learning_quaternians/
     ├── constants.rs    # Tolerances, rig geometry and demo configuration
     ├── quaternion.rs   # Quaternion mathematics
     ├── gimbal_lock.rs  # Gimbal lock detection and analysis
-    └── visualization.rs # Visualization scene building and HTML export
+    ├── visualization.rs # Visualization module entry point
+    └── visualization/
+        ├── camera.rs    # Orthographic camera and projection
+        ├── geometry.rs  # World/projected points and geometric helpers
+        ├── model.rs     # Serializable scene and frame types
+        ├── rig.rs       # Nested gimbal geometry
+        ├── demo.rs      # Teaching sequences, metrics and summary
+        ├── export.rs    # HTML assembly and file/browser operations
+        └── assets/      # Embedded HTML, CSS and JavaScript
 ```
 
 ## Development Commands
